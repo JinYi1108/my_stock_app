@@ -3,6 +3,7 @@ import akshare as ak
 import pandas as pd
 from datetime import datetime
 import numpy as np
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="多周期选股数据", layout="wide")
 
@@ -83,6 +84,63 @@ param_n = st.sidebar.slider("N (计算周期)", min_value=3, max_value=20, value
 param_k = st.sidebar.slider("K (倍数)", min_value=1.0, max_value=5.0, value=3.0, step=0.1)
 threshold = st.sidebar.slider("收敛阈值 (%)", min_value=1.0, max_value=10.0, value=3.0, step=0.1) / 100
 
+
+def plot_bbiboll_interactive(df, symbol_name):
+
+    if df.empty or "BBI_UPPER" not in df.columns:
+        return None
+
+
+    fig = go.Figure()
+
+    fig.add_trace(go.Candlestick(
+        x=df['datetime'],
+        open=df['open'],
+        high=df['high'],
+        low=df['low'],
+        close=df['close'],
+        name='K线'
+    ))
+
+
+    line_style = dict(width=1.5)
+    fig.add_trace(go.Scatter(x=df['datetime'], y=df['BBI_UPPER'], 
+                             name='上轨', line=dict(color='rgba(255, 0, 0, 0.4)', **line_style)))
+    fig.add_trace(go.Scatter(x=df['datetime'], y=df['BBI_MID'], 
+                             name='中轨', line=dict(color='rgba(0, 0, 255, 0.4)', **line_style)))
+    fig.add_trace(go.Scatter(x=df['datetime'], y=df['BBI_LOWER'], 
+                             name='下轨', line=dict(color='rgba(0, 255, 0, 0.4)', **line_style)))
+
+    conv_df = df[df["IS_CONVERGING"] == True]
+    if not conv_df.empty:
+        fig.add_trace(go.Scatter(
+            x=conv_df['datetime'],
+            y=conv_df['low'] * 0.99, 
+            mode='markers',
+            marker=dict(symbol='triangle-up', size=12, color='firebrick'),
+            name='收敛信号'
+        ))
+
+
+    fig.update_layout(
+        title=f"{symbol_name} 多周期分析",
+        yaxis_title="价格",
+        xaxis_rangeslider_visible=False,
+        height=600,
+        template="plotly_white",
+        hovermode="x unified"
+    )
+
+
+    fig.update_xaxes(
+        rangebreaks=[
+            dict(bounds=["sat", "mon"]), 
+        ]
+    )
+
+    return fig
+
+
 if st.sidebar.button("刷新数据并计算"):
     data_list = fetch_and_process(symbol, d_start, d_end, m60_s, m15_s)
     periods = ["日线", "周线", "月线", "60min", "15min"]
@@ -134,6 +192,17 @@ if st.sidebar.button("刷新数据并计算"):
                 "带宽比": f"{current_row['WIDTH_RATIO']*100:.2f}%",
                 "最新时间": current_row['datetime'].strftime("%Y-%m-%d %H:%M")
             })
+
+            st.markdown(f"#### 📈 {name} 交互式走势图")
+            
+    
+            fig = plot_bbiboll_interactive(df_bb, symbol)
+            
+            if fig:
+
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.error("无法生成图表，请检查数据")
 
 
     st.markdown("### 🎯 多周期收敛汇总")
