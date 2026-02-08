@@ -3,8 +3,8 @@ import akshare as ak
 import pandas as pd
 from datetime import datetime
 import numpy as np
+from plotly.subplots import make_subplots
 import plotly.graph_objects as go
-
 st.set_page_config(page_title="多周期选股数据", layout="wide")
 
 
@@ -79,65 +79,129 @@ def compute_bbiboll(df, n=7, k=3):
 
 
 st.sidebar.markdown("---")
-st.sidebar.header("BBIBOLL 参数")
+st.sidebar.header("📊 BBIBOLL 参数")
 param_n = st.sidebar.slider("N (计算周期)", min_value=3, max_value=20, value=7)
 param_k = st.sidebar.slider("K (倍数)", min_value=1.0, max_value=5.0, value=3.0, step=0.1)
 threshold = st.sidebar.slider("收敛阈值 (%)", min_value=1.0, max_value=10.0, value=3.0, step=0.1) / 100
 
+st.sidebar.markdown("---")
+st.sidebar.header("📊 成交量挤压参数")
+vol_short = st.sidebar.number_input("短周期均量", value=7)
+vol_long = st.sidebar.number_input("长周期均量", value=14)
+vol_threshold = st.sidebar.slider("成交量挤压阈值", 0.1, 1.0, 0.5, step=0.05)
 
-def plot_bbiboll_interactive(df, symbol_name):
 
-    if df.empty or "BBI_UPPER" not in df.columns:
+def compute_vol_compression(df, short=7, long=14, threshold_ratio=0.5):
+    if df.empty or len(df) < long * 3:
+        return pd.DataFrame()
+    
+    df = df.copy()
+
+    df['VOL_SHORT'] = df['volume'].rolling(short).mean()
+    df['VOL_LONG'] = df['volume'].rolling(long).mean()
+
+    max_long = df['VOL_LONG'].rolling(long * 3).max()
+    df['VOL_RATIO'] = df['VOL_SHORT'] / max_long
+
+
+    df['VOL_COMPRESSED'] = df['VOL_RATIO'] <= threshold_ratio
+    return df
+
+# def plot_bbiboll_interactive(df, symbol_name):
+
+#     if df.empty or "BBI_UPPER" not in df.columns:
+#         return None
+
+
+#     fig = go.Figure()
+
+#     fig.add_trace(go.Candlestick(
+#         x=df['datetime'],
+#         open=df['open'],
+#         high=df['high'],
+#         low=df['low'],
+#         close=df['close'],
+#         name='K线'
+#     ))
+
+
+#     line_style = dict(width=1.5)
+#     fig.add_trace(go.Scatter(x=df['datetime'], y=df['BBI_UPPER'], 
+#                              name='上轨', line=dict(color='rgba(255, 0, 0, 0.4)', **line_style)))
+#     fig.add_trace(go.Scatter(x=df['datetime'], y=df['BBI_MID'], 
+#                              name='中轨', line=dict(color='rgba(0, 0, 255, 0.4)', **line_style)))
+#     fig.add_trace(go.Scatter(x=df['datetime'], y=df['BBI_LOWER'], 
+#                              name='下轨', line=dict(color='rgba(0, 255, 0, 0.4)', **line_style)))
+
+#     conv_df = df[df["IS_CONVERGING"] == True]
+#     if not conv_df.empty:
+#         fig.add_trace(go.Scatter(
+#             x=conv_df['datetime'],
+#             y=conv_df['low'] * 0.99, 
+#             mode='markers',
+#             marker=dict(symbol='triangle-up', size=12, color='firebrick'),
+#             name='收敛信号'
+#         ))
+
+
+#     fig.update_layout(
+#         title=f"{symbol_name} 多周期分析",
+#         yaxis_title="价格",
+#         xaxis_rangeslider_visible=False,
+#         height=600,
+#         template="plotly_white",
+#         hovermode="x unified"
+#     )
+
+
+#     fig.update_xaxes(
+#         rangebreaks=[
+#             dict(bounds=["sat", "mon"]), 
+#         ]
+#     )
+
+#     return fig
+
+def plot_combined_chart(df, symbol_name):
+    if df.empty or "BBI_UPPER" not in df.columns or "VOL_RATIO" not in df.columns:
         return None
 
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, 
+                        vertical_spacing=0.05, row_heights=[0.7, 0.3])
 
-    fig = go.Figure()
 
     fig.add_trace(go.Candlestick(
-        x=df['datetime'],
-        open=df['open'],
-        high=df['high'],
-        low=df['low'],
-        close=df['close'],
-        name='K线'
-    ))
+        x=df['datetime'], open=df['open'], high=df['high'], 
+        low=df['low'], close=df['close'], name='K线'
+    ), row=1, col=1)
 
+    line_style = dict(width=1)
+    fig.add_trace(go.Scatter(x=df['datetime'], y=df['BBI_UPPER'], name='上轨', line=dict(color='rgba(255,0,0,0.3)', **line_style)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df['datetime'], y=df['BBI_MID'], name='中轨', line=dict(color='rgba(0,0,255,0.2)', **line_style)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df['datetime'], y=df['BBI_LOWER'], name='下轨', line=dict(color='rgba(0,255,0,0.3)', **line_style)), row=1, col=1)
 
-    line_style = dict(width=1.5)
-    fig.add_trace(go.Scatter(x=df['datetime'], y=df['BBI_UPPER'], 
-                             name='上轨', line=dict(color='rgba(255, 0, 0, 0.4)', **line_style)))
-    fig.add_trace(go.Scatter(x=df['datetime'], y=df['BBI_MID'], 
-                             name='中轨', line=dict(color='rgba(0, 0, 255, 0.4)', **line_style)))
-    fig.add_trace(go.Scatter(x=df['datetime'], y=df['BBI_LOWER'], 
-                             name='下轨', line=dict(color='rgba(0, 255, 0, 0.4)', **line_style)))
 
     conv_df = df[df["IS_CONVERGING"] == True]
     if not conv_df.empty:
         fig.add_trace(go.Scatter(
-            x=conv_df['datetime'],
-            y=conv_df['low'] * 0.99, 
-            mode='markers',
-            marker=dict(symbol='triangle-up', size=12, color='firebrick'),
-            name='收敛信号'
-        ))
+            x=conv_df['datetime'], y=conv_df['low']*0.98, mode='markers',
+            marker=dict(symbol='triangle-up', size=10, color='firebrick'), name='价格收敛'
+        ), row=1, col=1)
 
 
-    fig.update_layout(
-        title=f"{symbol_name} 多周期分析",
-        yaxis_title="价格",
-        xaxis_rangeslider_visible=False,
-        height=600,
-        template="plotly_white",
-        hovermode="x unified"
-    )
+    colors = ['red' if row['close'] >= row['open'] else 'green' for _, row in df.iterrows()]
+    fig.add_trace(go.Bar(x=df['datetime'], y=df['volume'], name='成交量', marker_color=colors, opacity=0.7), row=2, col=1)
 
 
-    fig.update_xaxes(
-        rangebreaks=[
-            dict(bounds=["sat", "mon"]), 
-        ]
-    )
+    vol_comp_df = df[df["VOL_COMPRESSED"] == True]
+    if not vol_comp_df.empty:
+        fig.add_trace(go.Scatter(
+            x=vol_comp_df['datetime'], y=[0] * len(vol_comp_df),
+            mode='markers', marker=dict(symbol='circle', size=6, color='blue'), name='量能挤压'
+        ), row=2, col=1)
 
+    fig.update_layout(height=700, template="plotly_white", xaxis_rangeslider_visible=False, showlegend=True, hovermode="x unified")
+    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
     return fig
 
 
@@ -150,62 +214,54 @@ if st.sidebar.button("刷新数据并计算"):
     for tab, name, df_raw in zip(tabs, periods, data_list):
         with tab:
             if df_raw.empty:
-                st.warning(f"{name} 无数据")
+                st.warning(f"{name} 周期暂无数据")
                 continue
 
-            df_bb = compute_bbiboll(df_raw, n=param_n, k=param_k)
+            df_processed = compute_bbiboll(df_raw, n=param_n, k=param_k)
+            if df_processed.empty:
+                st.warning(f"{name} 数据不足计算 BBIBOLL")
+                continue
             
-            if df_bb.empty:
-                st.warning(f"{name} 数据量不足以计算指标")
+      
+            df_processed["IS_CONVERGING"] = df_processed["WIDTH_RATIO"] <= threshold
+  
+            df_processed = compute_vol_compression(df_processed, short=vol_short, long=vol_long, threshold_ratio=vol_threshold)
+            
+            if df_processed.empty:
+                st.warning(f"{name} 数据不足计算成交量指标")
                 continue
 
-
-            df_bb["IS_CONVERGING"] = df_bb["WIDTH_RATIO"] <= threshold
-
-
-            current_row = df_bb.iloc[-1]
-            is_conv = current_row["IS_CONVERGING"]
+            curr = df_processed.iloc[-1]
             
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("最新收盘价", f"{current_row['close']:.2f}")
-            c2.metric("当前带宽比", f"{current_row['WIDTH_RATIO']*100:.2f}%")
-            diff = current_row['WIDTH_RATIO'] - threshold
-            c3.metric("状态", "✅ 已收敛" if is_conv else "❌ 波动中", 
-                      delta=f"{diff*100:.2f}%", delta_color="inverse")
-            c4.metric("数据总量", f"{len(df_bb)} 行")
+   
+            col_a, col_b, col_c, col_d = st.columns(4)
+            col_a.metric("收盘价", f"{curr['close']:.2f}")
+            col_b.metric("带宽比", f"{curr['WIDTH_RATIO']*100:.2f}%", 
+                         delta=f"{(curr['WIDTH_RATIO']-threshold)*100:.2f}%", delta_color="inverse")
+            col_c.metric("量能比", f"{curr['VOL_RATIO']*100:.1f}%")
+            col_d.write(f"状态: {'✅收敛' if curr['IS_CONVERGING'] else '❌波动'} | {'🔵地量' if curr['VOL_COMPRESSED'] else '⚪正常'}")
 
-     
-            st.markdown("#### 🚀 计算结果明细 (最近 50 条)")
-            
-            st.dataframe(df_bb.tail(50).style.applymap(
-                lambda x: 'background-color: rgba(0, 255, 0, 0.2)' if x == True else '', 
-                subset=['IS_CONVERGING']
-            ), use_container_width=True)
-
-            with st.expander("查看原始数据及完整指标"):
-                st.write(df_bb)
-
-        
+       
             results_summary.append({
                 "周期": name,
-                "收敛": "✅" if is_conv else "❌",
-                "带宽比": f"{current_row['WIDTH_RATIO']*100:.2f}%",
-                "最新时间": current_row['datetime'].strftime("%Y-%m-%d %H:%M")
+                "价格收敛": "✅" if curr['IS_CONVERGING'] else "❌",
+                "量能挤压": "🔵" if curr['VOL_COMPRESSED'] else "⚪",
+                "带宽比": f"{curr['WIDTH_RATIO']*100:.2f}%",
+                "最新时间": curr['datetime'].strftime("%Y-%m-%d %H:%M")
             })
 
-            st.markdown(f"#### 📈 {name} 交互式走势图")
-            
-    
-            fig = plot_bbiboll_interactive(df_bb, symbol)
-            
+     
+            fig = plot_combined_chart(df_processed, f"{symbol} ({name})")
             if fig:
-
                 st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.error("无法生成图表，请检查数据")
+
+    
+            with st.expander(f"查看 {name} 详细数据表"):
+                st.dataframe(df_processed.tail(100), use_container_width=True)
 
 
-    st.markdown("### 🎯 多周期收敛汇总")
-    summary_df = pd.DataFrame(results_summary)
-    st.table(summary_df)
+    if results_summary:
+        st.markdown("---")
+        st.markdown("### 🎯 多周期状态共振汇总")
+        st.table(pd.DataFrame(results_summary))
     
